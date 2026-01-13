@@ -1,8 +1,10 @@
 *.nsys-rep
 ./cse599/*
 trace.json
+*.json
 *.out
 *.ncu-rep
+__pycache__/
 *_demo/
 *Demo/
 *demo*/

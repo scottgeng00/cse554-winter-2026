@@ -7,7 +7,7 @@ def silu_torch(x: torch.Tensor) -> torch.Tensor:
 
 if __name__ == "__main__":
     NUM_ITERS_FOR_BENCHMARK = 100
-    MIN_NUM_MEM_ACCESSES_PER_ITER = 5
+    MIN_NUM_MEM_ACCESSES_PER_ITER = 2
 
     silu_torch_ref = torch.nn.SiLU()
 
@@ -39,7 +39,7 @@ if __name__ == "__main__":
             for _ in range(10):
                 y = silu_torch(x)
 
-    prof.export_chrome_trace("silu_torch_trace.json")
+    prof.export_chrome_trace("torch_silu.json")
 
     each_iter_time = start.elapsed_time(end) / 1000 / NUM_ITERS_FOR_BENCHMARK  # Convert milliseconds to seconds
     print("Time taken for silu:", each_iter_time, "seconds")
