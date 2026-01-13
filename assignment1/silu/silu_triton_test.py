@@ -1,8 +1,9 @@
 import torch
-from silu_triton_kernel import silu_triton
+from silu_triton_kernel import silu_triton, silu_triton_2d
 
 NUM_ITERS_FOR_BENCHMARK = 1000
 MIN_NUM_MEM_ACCESSES_PER_ITER = 2
+KERNEL_IMPLEMENTATION = silu_triton
 
 # Test the Triton kernel
 torch.manual_seed(0)
@@ -11,7 +12,7 @@ size = (8192, 8192)
 x = torch.rand(size, device="cuda")
 
 output_torch = torch.nn.SiLU()(x)
-output_triton = silu_triton(x)
+output_triton = KERNEL_IMPLEMENTATION(x)
 
 print(output_torch)
 print(output_triton)
@@ -24,7 +25,7 @@ start = torch.cuda.Event(enable_timing=True)
 end = torch.cuda.Event(enable_timing=True)
 start.record()
 for _ in range(NUM_ITERS_FOR_BENCHMARK):
-    y = silu_triton(x)
+    y = KERNEL_IMPLEMENTATION(x)
 end.record()
 torch.cuda.synchronize()
 
