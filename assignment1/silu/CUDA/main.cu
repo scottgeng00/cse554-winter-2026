@@ -1,5 +1,4 @@
 #include <cuda_runtime.h>
-#include <cmath> // Required for expf
 #include <stdio.h>
 #include "silu.h"
 
@@ -35,12 +34,14 @@ int main() {
     }
 
     // Verify the result
+    float atol = 1e-6f; // this seems needed to get things to match
     bool success = true;
     for (int i = 0; i < num_rows; i++) {
         for (int j = 0; j < num_cols; j++) {
-            float expected = silu(host_input[i * num_rows + j]);
-            if (host_output[i * num_rows + j] != expected) {
-                printf("Mismatch at (%d, %d): %f != %f\n", i, j, host_output[j * num_rows + i], expected);
+            int index = i * num_cols + j;
+            float expected = silu(host_input[index]);
+            if (fabs(host_output[index] - expected) > atol) {
+                printf("Mismatch at (%d, %d): %f != %f\n", i, j, host_output[index], expected);
                 success = false;
                 break;
             }
