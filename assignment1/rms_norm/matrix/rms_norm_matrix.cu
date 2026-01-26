@@ -71,10 +71,13 @@ void rms_norm_matrix(float *input, float *weight, float *output, int rows, int c
     float ms;
     cudaEventElapsedTime(&ms, start, end);
 
-    // Bandwidth: read input (2x) + read weight + write output
-    size_t bytes = 3 * size_matrix + size_weight;
-    float bandwidth_gb = (bytes / 1e9) / (ms / 1000.0f);
-    printf("Kernel time: %.3f ms, Bandwidth: %.1f GB/s\n", ms, bandwidth_gb);
+    // Actual bandwidth: read input (2x) + read weight + write output
+    size_t actual_bytes = 3 * size_matrix + size_weight;
+    float achieved_bandwidth_gb = (actual_bytes / 1e9) / (ms / 1000.0f);
+    // Theoretical bandwidth calculation
+    size_t effective_bytes = 2 * size_matrix + size_weight; // assuming input read once, output written once, weight read once
+    float effective_bandwidth_gb = (effective_bytes / 1e9) / (ms / 1000.0f);
+    printf("Kernel time: %.3f ms, Actual Bandwidth: %.1f GB/s, Algo Bandwidth: %.1f GB/s\n", ms, achieved_bandwidth_gb, effective_bandwidth_gb);
 
     cudaEventDestroy(start);
     cudaEventDestroy(end);

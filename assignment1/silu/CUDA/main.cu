@@ -5,7 +5,7 @@
 #define atol 1e-6f
 
 float random_float() {
-    return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
+    return (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * 2.0f - 1.0f;
 }
 
 float silu_cpu(float x) {
@@ -41,7 +41,7 @@ int main() {
         for (int j = 0; j < num_cols; j++) {
             int index = i * num_cols + j;
             float expected = silu_cpu(host_input[index]);
-            if (fabs(host_output[index] - expected) > atol) {
+            if (fabsf(host_output[index] - expected) > atol) {
                 printf("Mismatch at (%d, %d): %f != %f\n", i, j, host_output[index], expected);
                 success = false;
                 break;

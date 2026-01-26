@@ -4,6 +4,11 @@
 #include <stdlib.h>
 #include <math.h>
 
+#define atol 1e-4f
+
+float random_float() {
+    return (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * 2.0f - 1.0f;
+}
 
 void rms_norm_cpu(float *input, float *weight, float *output, int rows, int cols, float epsilon) {
     for (int row = 0; row < rows; row++) {
@@ -11,9 +16,9 @@ void rms_norm_cpu(float *input, float *weight, float *output, int rows, int cols
         for (int col = 0; col < cols; col++) {
             sum_sq += input[row * cols + col] * input[row * cols + col];
         }
-        float rms = sqrtf(sum_sq / cols);
+        float rms = sqrtf((sum_sq / (float) cols) + epsilon);
         for (int col = 0; col < cols; col++) {
-            output[row * cols + col] = input[row * cols + col] / (rms + epsilon) * weight[col];
+            output[row * cols + col] = input[row * cols + col] / rms * weight[col];
         }
     }
 }
@@ -33,10 +38,10 @@ int main() {
     // Initialize input data
     srand(42);
     for (size_t i = 0; i < matrix_size; i++) {
-        h_input[i] = (float)rand() / RAND_MAX * 2.0f - 1.0f;
+        h_input[i] = random_float();
     }
     for (int i = 0; i < cols; i++) {
-        h_weight[i] = (float)rand() / RAND_MAX * 2.0f;
+        h_weight[i] = random_float() + 1.0f;
     }
 
     // Run GPU kernel
@@ -47,10 +52,9 @@ int main() {
 
     // Check result
     int errors = 0;
-    float tolerance = 1e-4f;
     for (size_t i = 0; i < matrix_size && errors < 5; i++) {
         float diff = fabsf(h_output_gpu[i] - h_output_cpu[i]);
-        if (diff > tolerance) {
+        if (diff > atol) {
             printf("Mismatch at %zu: GPU=%.6f, CPU=%.6f\n", i, h_output_gpu[i], h_output_cpu[i]);
             errors++;
         }
