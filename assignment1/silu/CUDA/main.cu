@@ -2,11 +2,13 @@
 #include <stdio.h>
 #include "silu.h"
 
+#define atol 1e-6f
+
 float random_float() {
     return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
 }
 
-float silu(float x) {
+float silu_cpu(float x) {
     return x / (1.0f + expf(-x));
 }
 
@@ -34,12 +36,11 @@ int main() {
     }
 
     // Verify the result
-    float atol = 1e-6f; // this seems needed to get things to match
     bool success = true;
     for (int i = 0; i < num_rows; i++) {
         for (int j = 0; j < num_cols; j++) {
             int index = i * num_cols + j;
-            float expected = silu(host_input[index]);
+            float expected = silu_cpu(host_input[index]);
             if (fabs(host_output[index] - expected) > atol) {
                 printf("Mismatch at (%d, %d): %f != %f\n", i, j, host_output[index], expected);
                 success = false;
