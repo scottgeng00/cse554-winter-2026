@@ -78,3 +78,16 @@ void rms_norm_vector(float *input, float *weight, float *output, int cols, float
     cudaFree(device_input);
     cudaFree(device_output);
 }
+
+// Kernel-only version for benchmarking (data already on GPU)
+void rms_norm_vector_kernel_only(float *d_input, float *d_weight, float *d_output, float *d_sqsum, int cols, float epsilon) {
+    // Reset sqsum to 0 before each call
+    cudaMemset(d_sqsum, 0, sizeof(float));
+
+    dim3 num_blocks_reduce((cols + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK);
+    dim3 num_blocks_normalize((cols + BLOCKSIZE - 1) / BLOCKSIZE);
+    dim3 num_threads(BLOCKSIZE);
+
+    sqsumKernel<<<num_blocks_reduce, num_threads>>>(d_input, d_sqsum, cols);
+    rms_norm_vector_kernel<<<num_blocks_normalize, num_threads>>>(d_input, d_weight, d_output, d_sqsum, cols, epsilon);
+}

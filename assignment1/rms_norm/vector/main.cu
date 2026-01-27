@@ -5,6 +5,7 @@
 #include <math.h>
 
 #define atol 1e-3f
+#define NUM_ITERS 100
 
 float random_float() {
     return (static_cast<float>(rand()) / static_cast<float>(RAND_MAX)) * 2.0f - 1.0f;
@@ -64,6 +65,60 @@ int main() {
     } else {
         printf("Result is incorrect!\n");
     }
+
+    // ========== Benchmark (kernel only, no memcpy) ==========
+    printf("\n=== RMS Norm Vector Benchmark ===\n");
+    printf("Vector size: %d\n", cols);
+    printf("Iterations: %d\n", NUM_ITERS);
+
+    // Allocate GPU memory once
+    float *d_input, *d_weight, *d_output, *d_sqsum;
+    cudaMalloc((void**)&d_input, cols * sizeof(float));
+    cudaMalloc((void**)&d_weight, cols * sizeof(float));
+    cudaMalloc((void**)&d_output, cols * sizeof(float));
+    cudaMalloc((void**)&d_sqsum, sizeof(float));
+
+    // Copy data to GPU once
+    cudaMemcpy(d_input, h_input, cols * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_weight, h_weight, cols * sizeof(float), cudaMemcpyHostToDevice);
+
+    // Warmup
+    rms_norm_vector_kernel_only(d_input, d_weight, d_output, d_sqsum, cols, epsilon);
+    cudaDeviceSynchronize();
+
+    // Timing (kernel only)
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+    for (int i = 0; i < NUM_ITERS; i++) {
+        rms_norm_vector_kernel_only(d_input, d_weight, d_output, d_sqsum, cols, epsilon);
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    float avg_time_ms = milliseconds / NUM_ITERS;
+    float avg_time_s = avg_time_ms / 1000.0f;
+
+    // Calculate memory throughput
+    // Minimum: 1 read input + 1 write output = 2 accesses per element
+    size_t min_bytes = 2 * cols * sizeof(float);
+    float min_throughput_gb_s = (min_bytes / 1e9) / avg_time_s;
+
+    printf("Average kernel time: %.4f ms\n", avg_time_ms);
+    printf("Minimum memory accesses: 2 per element (1 read + 1 write)\n");
+    printf("Minimum memory traffic: %.2f MB\n", min_bytes / 1e6);
+    printf("Memory throughput: %.2f GB/s\n", min_throughput_gb_s);
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    cudaFree(d_input);
+    cudaFree(d_weight);
+    cudaFree(d_output);
+    cudaFree(d_sqsum);
 
     // Free memory
     free(h_input);

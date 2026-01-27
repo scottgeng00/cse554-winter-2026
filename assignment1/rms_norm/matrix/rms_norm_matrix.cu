@@ -65,3 +65,10 @@ void rms_norm_matrix(float *input, float *weight, float *output, int rows, int c
     cudaFree(device_input);
     cudaFree(device_output);
 }
+
+// Kernel-only version for benchmarking (data copied once before timing loop)
+void rms_norm_matrix_kernel_only(float *d_input, float *d_weight, float *d_output, int rows, int cols, float epsilon) {
+    dim3 num_blocks(rows);
+    dim3 num_threads(BLOCKSIZE);
+    rms_norm_matrix_kernel<<<num_blocks, num_threads>>>(d_input, d_weight, d_output, rows, cols, epsilon);
+}
