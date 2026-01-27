@@ -23,26 +23,6 @@ int main() {
     copy_first_column(h_matrix, d_column, ROWS, COLS);
     cudaDeviceSynchronize();
     
-    // run a bunch of times and get average copy time.
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-    
-    const int NUM_RUNS = 100;
-    cudaEventRecord(start);
-    for (int i = 0; i < NUM_RUNS; i++) {
-        copy_first_column(h_matrix, d_column, ROWS, COLS);
-    }
-    cudaEventRecord(stop);
-    cudaEventSynchronize(stop);
-    
-    float ms;
-    cudaEventElapsedTime(&ms, start, stop);
-    std::cout << "copy_first_column avg time: " << (ms * 1000) / NUM_RUNS << " us" << std::endl;
-    
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    
     // Verify
     float *h_result = new float[ROWS];
     cudaMemcpy(h_result, d_column, ROWS * sizeof(float), cudaMemcpyDeviceToHost);
@@ -57,6 +37,8 @@ int main() {
         }
     }
     std::cout << "Verification: " << (correct ? "PASSED" : "FAILED") << std::endl;
+    
+    copy_first_column_time(h_matrix, ROWS, COLS);
     
     delete[] h_result;
     cudaFree(d_column);

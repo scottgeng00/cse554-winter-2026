@@ -78,3 +78,66 @@ void rms_norm_vector(float *input, float *weight, float *output, int cols, float
     cudaFree(device_input);
     cudaFree(device_output);
 }
+
+void rms_norm_vector_time(float *input, float *weight, int cols, float epsilon) {
+    size_t size = cols * sizeof(float);
+
+    // Allocate device memory
+    float *device_input, *device_output, *device_weight, *d_sqsum;
+    cudaMalloc((void**)&device_input, size);
+    cudaMalloc((void**)&device_output, size);
+    cudaMalloc((void**)&device_weight, size);
+    cudaMalloc((void**)&d_sqsum, sizeof(float));
+
+    cudaMemcpy(device_input, input, size, cudaMemcpyHostToDevice);
+    cudaMemcpy(device_weight, weight, size, cudaMemcpyHostToDevice);
+
+    dim3 num_blocks_reduce((cols + ELEMENTS_PER_BLOCK - 1) / ELEMENTS_PER_BLOCK);
+    dim3 num_blocks_normalize((cols + BLOCKSIZE - 1) / BLOCKSIZE);
+    dim3 num_threads(BLOCKSIZE);
+
+    // Warmup run
+    cudaMemset(d_sqsum, 0, sizeof(float));
+    sqsumKernel<<<num_blocks_reduce, num_threads>>>(device_input, d_sqsum, cols);
+    rms_norm_vector_kernel<<<num_blocks_normalize, num_threads>>>(device_input, device_weight, device_output, d_sqsum, cols, epsilon);
+    cudaDeviceSynchronize();
+
+    // Timed runs
+    const int NUM_ITERS = 100;
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+
+    cudaEventRecord(start);
+    for (int i = 0; i < NUM_ITERS; i++) {
+        cudaMemset(d_sqsum, 0, sizeof(float));
+        sqsumKernel<<<num_blocks_reduce, num_threads>>>(device_input, d_sqsum, cols);
+        rms_norm_vector_kernel<<<num_blocks_normalize, num_threads>>>(device_input, device_weight, device_output, d_sqsum, cols, epsilon);
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    float total_ms = 0;
+    cudaEventElapsedTime(&total_ms, start, stop);
+    float avg_ms = total_ms / NUM_ITERS;
+
+    /*
+     * minimum memory accesses for rms_norm is 2: one read, one write.
+     * So total memory accesses is 2 * cols (rows == 1 for this problem).
+     */
+    double total_bytes = (double)cols * 2.0 * sizeof(float);
+    double bandwidth_GBs = (total_bytes / 1e9) / (avg_ms / 1e3);
+    double peak_bandwidth = 672.0;  // from Quadro RTX 6000 info sheet
+    double utilization = (bandwidth_GBs / peak_bandwidth) * 100.0;
+
+    printf("Time: %.4f ms (avg over %d iters)\n", avg_ms, NUM_ITERS);
+    printf("Theoretical memory accesses: %.2f MB\n", total_bytes / 1e6);
+    printf("Bandwidth: %.2f GB/s (%.1f%% of %.0f GB/s peak)\n", bandwidth_GBs, utilization, peak_bandwidth);
+
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+    cudaFree(d_sqsum);
+    cudaFree(device_weight);
+    cudaFree(device_input);
+    cudaFree(device_output);
+}

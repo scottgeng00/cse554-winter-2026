@@ -66,6 +66,9 @@ int main() {
         printf("Result is incorrect!\n");
     }
 
+    // Run timing
+    rms_norm_matrix_time(h_input, h_weight, rows, cols, epsilon);
+
     // Free memory
     free(h_input);
     free(h_weight);
