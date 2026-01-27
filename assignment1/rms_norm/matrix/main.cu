@@ -45,27 +45,60 @@ int main() {
         h_weight[i] = random_float() + 1.0f;
     }
 
-    // Run GPU kernel once for correctness check
-    rms_norm_matrix(h_input, h_weight, h_output_gpu, rows, cols, epsilon);
-
     // Run CPU reference
     rms_norm_cpu(h_input, h_weight, h_output_cpu, rows, cols, epsilon);
 
-    // Check result
+    // ========== Check Version 1: Original ==========
+    printf("=== Correctness Check ===\n");
+    rms_norm_matrix(h_input, h_weight, h_output_gpu, rows, cols, epsilon);
+
     int errors = 0;
     for (size_t i = 0; i < matrix_size && errors < 5; i++) {
         float diff = fabsf(h_output_gpu[i] - h_output_cpu[i]);
         if (diff > atol) {
-            printf("Mismatch at %zu: GPU=%.6f, CPU=%.6f\n", i, h_output_gpu[i], h_output_cpu[i]);
+            printf("V1 Mismatch at %zu: GPU=%.6f, CPU=%.6f\n", i, h_output_gpu[i], h_output_cpu[i]);
             errors++;
         }
     }
 
     if (errors == 0) {
-        printf("Result is correct!\n");
+        printf("Version 1 (Original): CORRECT\n");
     } else {
-        printf("Result is incorrect!\n");
+        printf("Version 1 (Original): INCORRECT\n");
     }
+
+    // ========== Check Version 2: Vectorized ==========
+    float *d_input_check, *d_weight_check, *d_output_check;
+    cudaMalloc((void**)&d_input_check, matrix_size * sizeof(float));
+    cudaMalloc((void**)&d_weight_check, cols * sizeof(float));
+    cudaMalloc((void**)&d_output_check, matrix_size * sizeof(float));
+
+    cudaMemcpy(d_input_check, h_input, matrix_size * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_weight_check, h_weight, cols * sizeof(float), cudaMemcpyHostToDevice);
+
+    rms_norm_matrix_kernel_only_vectorized(d_input_check, d_weight_check, d_output_check, rows, cols, epsilon);
+    cudaDeviceSynchronize();
+
+    cudaMemcpy(h_output_gpu, d_output_check, matrix_size * sizeof(float), cudaMemcpyDeviceToHost);
+
+    errors = 0;
+    for (size_t i = 0; i < matrix_size && errors < 5; i++) {
+        float diff = fabsf(h_output_gpu[i] - h_output_cpu[i]);
+        if (diff > atol) {
+            printf("V2 Mismatch at %zu: GPU=%.6f, CPU=%.6f\n", i, h_output_gpu[i], h_output_cpu[i]);
+            errors++;
+        }
+    }
+
+    if (errors == 0) {
+        printf("Version 2 (Vectorized): CORRECT\n");
+    } else {
+        printf("Version 2 (Vectorized): INCORRECT\n");
+    }
+
+    cudaFree(d_input_check);
+    cudaFree(d_weight_check);
+    cudaFree(d_output_check);
 
     // ========== Benchmark (kernel only, no memcpy) ==========
     printf("\n=== RMS Norm Matrix Benchmark ===\n");
@@ -82,15 +115,22 @@ int main() {
     cudaMemcpy(d_input, h_input, matrix_size * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(d_weight, h_weight, cols * sizeof(float), cudaMemcpyHostToDevice);
 
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
+    float milliseconds = 0;
+    float avg_time_ms, avg_time_s;
+    size_t min_bytes = 2 * matrix_size * sizeof(float);
+    float min_throughput_gb_s;
+
+    // ========== Version 1: Original ==========
+    printf("\n--- Version 1: Original ---\n");
+
     // Warmup
     rms_norm_matrix_kernel_only(d_input, d_weight, d_output, rows, cols, epsilon);
     cudaDeviceSynchronize();
 
-    // Timing (kernel only)
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
+    // Timing
     cudaEventRecord(start);
     for (int i = 0; i < NUM_ITERS; i++) {
         rms_norm_matrix_kernel_only(d_input, d_weight, d_output, rows, cols, epsilon);
@@ -98,20 +138,41 @@ int main() {
     cudaEventRecord(stop);
     cudaEventSynchronize(stop);
 
-    float milliseconds = 0;
     cudaEventElapsedTime(&milliseconds, start, stop);
-    float avg_time_ms = milliseconds / NUM_ITERS;
-    float avg_time_s = avg_time_ms / 1000.0f;
-
-    // Calculate memory throughput
-    // Minimum: 1 read input + 1 write output = 2 accesses per element
-    size_t min_bytes = 2 * matrix_size * sizeof(float);
-    float min_throughput_gb_s = (min_bytes / 1e9) / avg_time_s;
+    avg_time_ms = milliseconds / NUM_ITERS;
+    avg_time_s = avg_time_ms / 1000.0f;
+    min_throughput_gb_s = (min_bytes / 1e9) / avg_time_s;
 
     printf("Average kernel time: %.4f ms\n", avg_time_ms);
+    printf("Memory throughput: %.2f GB/s\n", min_throughput_gb_s);
+
+    // ========== Version 2: Vectorized ==========
+    printf("\n--- Version 2: Vectorized (float4) ---\n");
+
+    // Warmup
+    rms_norm_matrix_kernel_only_vectorized(d_input, d_weight, d_output, rows, cols, epsilon);
+    cudaDeviceSynchronize();
+
+    // Timing
+    cudaEventRecord(start);
+    for (int i = 0; i < NUM_ITERS; i++) {
+        rms_norm_matrix_kernel_only_vectorized(d_input, d_weight, d_output, rows, cols, epsilon);
+    }
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    avg_time_ms = milliseconds / NUM_ITERS;
+    avg_time_s = avg_time_ms / 1000.0f;
+    min_throughput_gb_s = (min_bytes / 1e9) / avg_time_s;
+
+    printf("Average kernel time: %.4f ms\n", avg_time_ms);
+    printf("Memory throughput: %.2f GB/s\n", min_throughput_gb_s);
+
+    // ========== Summary ==========
+    printf("\n--- Summary ---\n");
     printf("Minimum memory accesses: 2 per element (1 read + 1 write)\n");
     printf("Minimum memory traffic: %.2f MB\n", min_bytes / 1e6);
-    printf("Memory throughput: %.2f GB/s\n", min_throughput_gb_s);
 
     cudaEventDestroy(start);
     cudaEventDestroy(stop);
