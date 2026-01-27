@@ -13,7 +13,6 @@ float silu_cpu(float x) {
 }
 
 int main() {
-    // Launch the kernel
     int num_rows = 8192;
     int num_cols = 8192;
     size_t size = num_rows * num_cols * sizeof(float);
@@ -49,6 +48,9 @@ int main() {
         }
     }
     if (success) printf("Success! All values match.\n");
+
+    // Run timing
+    silu_time(host_input, num_rows * num_cols);
 
     free(host_input);
     free(host_output);
