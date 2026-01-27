@@ -20,17 +20,31 @@ add_executable(
   copy_first_column.cu
 )
 
+# Bandwidth benchmark executable
+add_executable(
+  bandwidth_benchmark
+  bandwidth_benchmark.cu
+)
+
 # Ensure this target is built for the requested arch(es)
 set_property(TARGET copy PROPERTY CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
+set_property(TARGET bandwidth_benchmark PROPERTY CUDA_ARCHITECTURES "${CMAKE_CUDA_ARCHITECTURES}")
 
 # Common (safe) CUDA compile flags
 target_compile_options(copy PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:-O3 -DNDEBUG -Xcompiler=-fPIE -Xcompiler=-fno-strict-aliasing>
+)
+
+target_compile_options(bandwidth_benchmark PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:-O3 -DNDEBUG -Xcompiler=-fPIE -Xcompiler=-Wconversion -Xcompiler=-fno-strict-aliasing>
 )
 
 # Add Hopper "90a" codegen only if building for 90/90a.
 if("${CMAKE_CUDA_ARCHITECTURES}" MATCHES "(^|;)(90|90a)($|;)")
   target_compile_options(copy PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:--generate-code=arch=compute_90a,code=[compute_90a,sm_90a]>
+  )
+  target_compile_options(bandwidth_benchmark PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:--generate-code=arch=compute_90a,code=[compute_90a,sm_90a]>
   )
 endif()

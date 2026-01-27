@@ -68,52 +68,8 @@ void rms_norm_vector(float *input, float *weight, float *output, int cols, float
     dim3 num_blocks_normalize((cols + BLOCKSIZE - 1) / BLOCKSIZE);
     dim3 num_threads(BLOCKSIZE); 
 
-    // Time the kernel
-    cudaEvent_t start_reduce, end_reduce, start_normalize, end_normalize;
-    cudaEventCreate(&start_reduce);
-    cudaEventCreate(&end_reduce);
-    cudaEventCreate(&start_normalize);
-    cudaEventCreate(&end_normalize);
-
-    // maybe warmup reduction
-    // sqsumKernel<<<num_blocks_reduce, num_threads>>>(device_input, d_sqsum, cols);
-    // cudaDeviceSynchronize();
-    // cudaMemset(d_sqsum, 0, sizeof(float));
-
-    // time the reduction
-    cudaEventRecord(start_reduce);
     sqsumKernel<<<num_blocks_reduce, num_threads>>>(device_input, d_sqsum, cols);
-    cudaEventRecord(end_reduce);
-    cudaEventSynchronize(end_reduce);
-
-    // time the normalization
-    cudaEventRecord(start_normalize);
     rms_norm_vector_kernel<<<num_blocks_normalize, num_threads>>>(device_input, device_weight, device_output, d_sqsum, cols, epsilon);
-    cudaEventRecord(end_normalize);
-    cudaEventSynchronize(end_normalize);
-
-    // calculate elapsed time
-    float reduce_ms, normalize_ms;
-    cudaEventElapsedTime(&reduce_ms, start_reduce, end_reduce);
-    cudaEventElapsedTime(&normalize_ms, start_normalize, end_normalize);
-    float total_ms = reduce_ms + normalize_ms;
-
-    // Bandwidth: read input (2x) + read weight + write output
-    // Actual bandwidth: read input (2x) + read weight + write output
-    size_t actual_bytes = 4 * size;
-    float achieved_bandwidth_gb = (actual_bytes / 1e9) / (total_ms / 1000.0f);
-    size_t effective_bytes = 2 * size; // assuming input read once, output written once, weight read once
-    float effective_bandwidth_gb = (effective_bytes / 1e9) / (total_ms / 1000.0f);
-
-    printf("Kernel time: %.3f ms, Actual Bandwidth: %.1f GB/s, Algo Bandwidth: %.1f GB/s\n", total_ms, achieved_bandwidth_gb, effective_bandwidth_gb);
-    printf("Reduction time: %.3f ms, Normalization time: %.3f ms, Total time: %.3f ms\n", reduce_ms, normalize_ms, total_ms);
-    printf("Reduction bandwidth: %.1f GB/s\n", (size / 1e9) / (reduce_ms / 1000.0f));
-    printf("Normalization bandwidth: %.1f GB/s\n", (3 * size / 1e9) / (normalize_ms / 1000.0f));
-
-    cudaEventDestroy(start_reduce);
-    cudaEventDestroy(end_reduce);
-    cudaEventDestroy(start_normalize);
-    cudaEventDestroy(end_normalize);
 
     // copy output back to host
     cudaMemcpy(output, device_output, size, cudaMemcpyDeviceToHost);

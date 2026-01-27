@@ -11,3 +11,6 @@ __pycache__/
 *Answer*/
 **/build/*
 *.DS_Store
+
+# build artifacts
+build/

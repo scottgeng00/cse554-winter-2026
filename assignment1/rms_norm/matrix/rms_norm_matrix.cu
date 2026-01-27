@@ -15,7 +15,6 @@ __global__ void rms_norm_matrix_kernel(float *input, float *weight, float *outpu
 
     float partial_sum_sq = 0.0f;
     for (int col = tid; col < cols; col += blockDim.x) {
-        // load input value
         float val = input[row * cols + col];
         partial_sum_sq += val * val;
     }
@@ -58,29 +57,7 @@ void rms_norm_matrix(float *input, float *weight, float *output, int rows, int c
     dim3 num_blocks(rows);      // One block per row
     dim3 num_threads(BLOCKSIZE); // Threads cooperate within each row
 
-    // Time the kernel
-    cudaEvent_t start, end;
-    cudaEventCreate(&start);
-    cudaEventCreate(&end);
-
-    cudaEventRecord(start);
     rms_norm_matrix_kernel<<<num_blocks, num_threads>>>(device_input, device_weight, device_output, rows, cols, epsilon);
-    cudaEventRecord(end);
-    cudaEventSynchronize(end);
-
-    float ms;
-    cudaEventElapsedTime(&ms, start, end);
-
-    // Actual bandwidth: read input (2x) + read weight + write output
-    size_t actual_bytes = 3 * size_matrix + size_weight;
-    float achieved_bandwidth_gb = (actual_bytes / 1e9) / (ms / 1000.0f);
-    // Theoretical bandwidth calculation
-    size_t effective_bytes = 2 * size_matrix + size_weight; // assuming input read once, output written once, weight read once
-    float effective_bandwidth_gb = (effective_bytes / 1e9) / (ms / 1000.0f);
-    printf("Kernel time: %.3f ms, Actual Bandwidth: %.1f GB/s, Algo Bandwidth: %.1f GB/s\n", ms, achieved_bandwidth_gb, effective_bandwidth_gb);
-
-    cudaEventDestroy(start);
-    cudaEventDestroy(end);
 
     // copy output back to host
     cudaMemcpy(output, device_output, size_matrix, cudaMemcpyDeviceToHost);
