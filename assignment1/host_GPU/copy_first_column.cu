@@ -5,9 +5,10 @@
 // I hope this is allowed! we just use a static buffer. Initially, this is slow
 // but on repeated runs its very fast.
 static float *pinned_buffer = nullptr;
+const bool REALLOATE_STATIC_BUFFER = false;
 
 void copy_first_column(float *h_A, float *d_A, int rows, int cols) {
-    if (!pinned_buffer) {
+    if (REALLOATE_STATIC_BUFFER || !pinned_buffer) {
         cudaMallocHost(&pinned_buffer, rows * sizeof(float));
     }
     
