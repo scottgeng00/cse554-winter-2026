@@ -21,7 +21,11 @@ class Engine:
         self.layers = 16            # Number of transformer layers
 
         # Load the tokenizer for text processing
-        self.tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B")
+        # self.tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B")
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            self.weight_path,
+            local_files_only=True
+        )
 
         # Initialize and load model weights using the helper module
         weight_manager = WeightManager()
