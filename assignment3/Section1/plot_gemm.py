@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 # Load CSV
 # batch_size,N,K,library,tflops
-df = pd.read_csv('gemm_perf.csv')
+df = pd.read_csv('Section1/gemm_perf.csv')
 
 # Get all unique (N, K) shapes
 shapes = df[['N', 'K']].drop_duplicates().values.tolist()
@@ -25,4 +25,7 @@ for N, K in shapes:
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
-    plt.show()
+    fname = f'Section1/gemm_perf_N{N}_K{K}.pdf'
+    plt.savefig(fname, dpi=200)
+    print(f'Saved {fname}')
+    plt.close()
