@@ -176,11 +176,11 @@ class Engine:
     # ---------------------------------------------------------------------
     def __init__(self) -> None:
         # ---- model hyper-parameters --------------------------------------
-        self.weight_path = "/model/Meta-Llama-3-8B-Instruct"
-        self.head_dim = 128
-        self.num_qo_heads = 32
-        self.num_kv_heads = 8
-        self.layers = 32
+        self.weight_path = "/local1/cse554/models/meta-llama/Llama-3.2-1B"
+        self.head_dim = 64
+        self.num_qo_heads = 32      
+        self.num_kv_heads = 8       
+        self.layers = 16           
 
         self.tokenizer = AutoTokenizer.from_pretrained(self.weight_path)
 

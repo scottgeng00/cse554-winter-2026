@@ -1,6 +1,25 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+#Reference config for each model
+llama3_1b_config = {
+    "hidden_size": 2048,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 8
+}
+
+llama3_3b_config = {
+    "hidden_size": 3072,
+    "num_attention_heads": 24,
+    "num_key_value_heads": 8
+}
+
+llama3_8b_config = {
+    "hidden_size": 4096,
+    "num_attention_heads": 32,
+    "num_key_value_heads": 8
+}
+
 # Sequence lengths (powers of 2)
 p_llama3 = 2 ** np.arange(7, 16)   # 2^7 to 2^15
 

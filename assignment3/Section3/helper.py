@@ -171,5 +171,6 @@ def extract_model_weights(weight_map: dict, layers: int) -> dict:
         weight_map[f"model.layers.{layer}.mlp.down_proj.weight"] for layer in range(layers)
     ]
     weights["model_layernorm_weight"] = weight_map["model.norm.weight"]
-    weights["lm_head_weight"] = weight_map["lm_head.weight"]
+    # weights["lm_head_weight"] = weight_map["lm_head.weight"]
+    weights["lm_head_weight"] = weight_map["model.embed_tokens.weight"]
     return weights
