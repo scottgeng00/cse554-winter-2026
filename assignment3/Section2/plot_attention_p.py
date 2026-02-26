@@ -1,7 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import json
 
-#Reference config for each model
+# Reference config for each model
 llama3_1b_config = {
     "hidden_size": 2048,
     "num_attention_heads": 32,
@@ -23,59 +24,108 @@ llama3_8b_config = {
 # Sequence lengths (powers of 2)
 p_llama3 = 2 ** np.arange(7, 16)   # 2^7 to 2^15
 
-# Fake TFLOPs data generator
-def fake_tflops(seq_lens, model_factor):
-    return np.log2(seq_lens) * model_factor + np.random.normal(0, 0.5, size=len(seq_lens))
+# Load real benchmark data
+with open("q2_prefill_results.json") as f:
+    prefill_data = json.load(f)
+with open("q2_decode_results.json") as f:
+    decode_data = json.load(f)
 
-# Generate fake compute utilization data
-llama3_1b_sdpa = fake_tflops(p_llama3, 2.0)
-llama3_1b_flashinfer = fake_tflops(p_llama3, 2.2)
-
-llama3_3b_sdpa = fake_tflops(p_llama3, 2.5)
-llama3_3b_flashinfer = fake_tflops(p_llama3, 2.8)
-
-llama3_8b_sdpa = fake_tflops(p_llama3, 3.5)
-llama3_8b_flashinfer = fake_tflops(p_llama3, 3.9)
-
-# Plotting setup
-fig, axs = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
 models = ['LLaMA3-1B', 'LLaMA3-3B', 'LLaMA3-8B']
 
-# LLaMA2-7B plot
-axs[0].plot(p_llama3, llama3_1b_sdpa, label='PyTorch SDPA', marker='o')
-axs[0].plot(p_llama3, llama3_1b_flashinfer, label='FlashInfer', marker='x')
-axs[0].set_xscale('log', base=2)
-axs[0].set_title(models[0])
-axs[0].set_xlabel('p (sequence length)')
+# ── Prefill: bs=1, varying p ──
+res = prefill_data["exp1_vary_p"]["results"]
+fig, axs = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
+for i, name in enumerate(models):
+    axs[i].plot(p_llama3, res[name]["sdpa"], label='PyTorch SDPA', marker='o')
+    axs[i].plot(p_llama3, res[name]["flashinfer"], label='FlashInfer', marker='x')
+    axs[i].set_xscale('log', base=2)
+    axs[i].set_title(name)
+    axs[i].set_xlabel('p (sequence length)')
+    axs[i].set_xticks(p_llama3)
+    axs[i].set_xticklabels([str(p) for p in p_llama3])
+    axs[i].legend()
+    axs[i].grid(True, which='both')
 axs[0].set_ylabel('Compute Utilization (TFLOPs)')
-axs[0].set_xticks(p_llama3)
-axs[0].set_xticklabels([str(p) for p in p_llama3])
-axs[0].legend()
-axs[0].grid(True, which='both')
-
-# LLaMA3-8B plot
-axs[1].plot(p_llama3, llama3_3b_sdpa, label='PyTorch SDPA', marker='o')
-axs[1].plot(p_llama3, llama3_3b_flashinfer, label='FlashInfer', marker='x')
-axs[1].set_xscale('log', base=2)
-axs[1].set_title(models[1])
-axs[1].set_xlabel('p (sequence length)')
-axs[1].set_xticks(p_llama3)
-axs[1].set_xticklabels([str(p) for p in p_llama3])
-axs[1].legend()
-axs[1].grid(True, which='both')
-
-# LLaMA3-70B plot
-axs[2].plot(p_llama3, llama3_8b_sdpa, label='PyTorch SDPA', marker='o')
-axs[2].plot(p_llama3, llama3_8b_flashinfer, label='FlashInfer', marker='x')
-axs[2].set_xscale('log', base=2)
-axs[2].set_title(models[2])
-axs[2].set_xlabel('p (sequence length)')
-axs[2].set_xticks(p_llama3)
-axs[2].set_xticklabels([str(p) for p in p_llama3])
-axs[2].legend()
-axs[2].grid(True, which='both')
-
-# Overall figure title and layout
-fig.suptitle('Prefill Attention Compute Utilization (Fake Data)', fontsize=16)
+fig.suptitle('Prefill Attention — bs=1, varying p', fontsize=16)
 plt.tight_layout(rect=[0, 0, 1, 0.95])
-plt.savefig('attention_compute_utilization.png', dpi=300)
+plt.savefig('q2_prefill_vary_p.png', dpi=300)
+print("Saved → q2_prefill_vary_p.png")
+
+# ── Prefill: varying batch size, p=1024 ──
+res = prefill_data["exp2_vary_bs"]["results"]
+bs_values = np.array(prefill_data["exp2_vary_bs"]["bs_values"])
+fig, axs = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
+for i, name in enumerate(models):
+    axs[i].plot(bs_values, res[name]["sdpa"], label='PyTorch SDPA', marker='o')
+    axs[i].plot(bs_values, res[name]["flashinfer"], label='FlashInfer', marker='x')
+    axs[i].set_xscale('log', base=2)
+    axs[i].set_title(name)
+    axs[i].set_xlabel('Batch Size')
+    axs[i].set_xticks(bs_values)
+    axs[i].set_xticklabels([str(b) for b in bs_values])
+    axs[i].legend()
+    axs[i].grid(True, which='both')
+axs[0].set_ylabel('Compute Utilization (TFLOPs)')
+fig.suptitle('Prefill Attention — p=1024, varying batch size', fontsize=16)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.savefig('q2_prefill_vary_bs.png', dpi=300)
+print("Saved → q2_prefill_vary_bs.png")
+
+# ── Decode: bs=1, varying c ──
+res = decode_data["exp1_vary_c"]["results"]
+c_values = np.array(decode_data["exp1_vary_c"]["c_values"])
+fig, axs = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
+for i, name in enumerate(models):
+    axs[i].plot(c_values, res[name]["sdpa"], label='PyTorch SDPA', marker='o')
+    axs[i].plot(c_values, res[name]["flashinfer"], label='FlashInfer', marker='x')
+    axs[i].set_xscale('log', base=2)
+    axs[i].set_title(name)
+    axs[i].set_xlabel('c (context length)')
+    axs[i].set_xticks(c_values)
+    axs[i].set_xticklabels([str(c) for c in c_values])
+    axs[i].legend()
+    axs[i].grid(True, which='both')
+axs[0].set_ylabel('Memory Bandwidth (GB/s)')
+fig.suptitle('Decode Attention — bs=1, varying c', fontsize=16)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.savefig('q2_decode_vary_c.png', dpi=300)
+print("Saved → q2_decode_vary_c.png")
+
+# ── Decode: varying batch size, c=1024 ──
+res = decode_data["exp2_vary_bs"]["results"]
+bs_values = np.array(decode_data["exp2_vary_bs"]["bs_values"])
+fig, axs = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
+for i, name in enumerate(models):
+    axs[i].plot(bs_values, res[name]["sdpa"], label='PyTorch SDPA', marker='o')
+    axs[i].plot(bs_values, res[name]["flashinfer"], label='FlashInfer', marker='x')
+    axs[i].set_xscale('log', base=2)
+    axs[i].set_title(name)
+    axs[i].set_xlabel('Batch Size')
+    axs[i].set_xticks(bs_values)
+    axs[i].set_xticklabels([str(b) for b in bs_values])
+    axs[i].legend()
+    axs[i].grid(True, which='both')
+axs[0].set_ylabel('Memory Bandwidth (GB/s)')
+fig.suptitle('Decode Attention — c=1024, varying batch size', fontsize=16)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.savefig('q2_decode_vary_bs.png', dpi=300)
+print("Saved → q2_decode_vary_bs.png")
+
+# ── Decode: bs=128, c=1024, varying page_size (FlashInfer only) ──
+res = decode_data["exp3_vary_pagesize"]["results"]
+page_sizes = decode_data["exp3_vary_pagesize"]["page_sizes"]
+fig, axs = plt.subplots(1, 3, figsize=(18, 5), sharey=True)
+for i, name in enumerate(models):
+    axs[i].plot(page_sizes, res[name]["flashinfer"], label='FlashInfer',
+                marker='s', color='tab:green')
+    axs[i].set_title(name)
+    axs[i].set_xlabel('Page Size')
+    axs[i].set_xticks(page_sizes)
+    axs[i].legend()
+    axs[i].grid(True, which='both')
+axs[0].set_ylabel('Memory Bandwidth (GB/s)')
+fig.suptitle('Decode Attention — bs=128, c=1024, varying page size (FlashInfer)',
+             fontsize=16)
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+plt.savefig('q2_decode_vary_pagesize.png', dpi=300)
+print("Saved → q2_decode_vary_pagesize.png")
