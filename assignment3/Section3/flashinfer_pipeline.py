@@ -132,8 +132,7 @@ def build_kv_metadata(kvs: List[DistKVCache]):
 
     for kv in kvs:
         kv_indices.extend(kv.indices)
-        last_kv_indx = kv_indptr[-1]
-        kv_indptr.append(len(kv.indices) + last_kv_indx)
+        kv_indptr.append(kv_indptr[-1] + len(kv.indices))
         kv_last_page_len.append(kv.last_page_offset)
 
     device = "cuda"
@@ -251,7 +250,8 @@ class Engine:
             # ----------------------------------------------------------------
             
             #########
-            # FIXME #
+            for req in requests[num_decode_req:]:
+                self.kv_cache_map[req.request_id] = DistKVCache(self.pool)
             #########
                 
             seq_lens_before: List[int] = []
@@ -262,7 +262,13 @@ class Engine:
             # ----------------------------------------------------------------
             
             #########
-            # FIXME #
+            for idx, req in enumerate(requests):
+                req_kv_cache = self.kv_cache_map[req.request_id]
+                # allocate one more token if decode (prompt alr cached), otherwise need to init for the entire prompt
+                if idx < num_decode_req:
+                    req_kv_cache.allocate_tokens(1)
+                else:
+                    req_kv_cache.allocate_tokens(req.prompt_length)
             #########
             
             seq_lens_after = [self.kv_cache_map[r.request_id].seqlen for r in requests]
@@ -278,15 +284,35 @@ class Engine:
             # ----------------------------------------------------------------
             if not len(requests) - num_decode_req == 0:
                 # plan prefill wrapper
-                pass
                 #########
-                # FIXME #
+                self.prefill_wrapper.plan(
+                    qo_indptr=indptr_tensor,
+                    paged_kv_indptr=kv_indptr,
+                    paged_kv_indices=kv_indices,
+                    paged_kv_last_page_len=kv_last_page_len,
+                    num_qo_heads=self.num_qo_heads,
+                    num_kv_heads=self.num_kv_heads,
+                    head_dim=self.head_dim,
+                    page_size=self.page_size,
+                    data_type=torch.float16,
+                    pos_encoding_mode="ROPE_LLAMA",
+                    causal=True
+                )
                 #########
             if num_decode_req > 0:
                 # plan decode wrapper
-                pass
                 #########
-                # FIXME #
+                self.decode_wrapper.plan(
+                    indptr=kv_indptr,
+                    indices=kv_indices,
+                    last_page_len=kv_last_page_len,
+                    num_qo_heads=self.num_qo_heads,
+                    num_kv_heads=self.num_kv_heads,
+                    head_dim=self.head_dim,
+                    page_size=self.page_size,
+                    data_type=torch.float16,
+                    pos_encoding_mode="ROPE_LLAMA"
+                )
                 #########
 
             # ----------------------------------------------------------------
