@@ -19,18 +19,6 @@ REPEAT = 200
 DTYPE = torch.float16
 DEVICE = "cuda"
 
-_sdpa_supports_gqa = False
-try:
-    _q = torch.randn(1, 2, 1, 4, device=DEVICE, dtype=DTYPE)
-    _k = torch.randn(1, 1, 1, 4, device=DEVICE, dtype=DTYPE)
-    F.scaled_dot_product_attention(_q, _k, _k, enable_gqa=True)
-    _sdpa_supports_gqa = True
-except TypeError:
-    pass
-del _q, _k
-print(f"torch SDPA enable_gqa support: {_sdpa_supports_gqa}")
-
-
 def _jit_warmup_flashinfer():
     print("Pre-warming FlashInfer JIT kernels …")
     for c in (2 ** np.arange(7, 16)).astype(int):
@@ -48,13 +36,8 @@ def decode_bytes(batch_size, num_qo_heads, num_kv_heads, head_dim, c):
     return batch_size * 2 * head_dim * (2 * num_qo_heads + 2 * num_kv_heads * c)
 
 
-def sdpa_decode(q, k, v, num_qo_heads, num_kv_heads):
-    if _sdpa_supports_gqa:
-        return F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
-    else:
-        g = num_qo_heads // num_kv_heads
-        return F.scaled_dot_product_attention(
-            q, k.repeat_interleave(g, dim=1), v.repeat_interleave(g, dim=1))
+def sdpa_decode(q, k, v):
+    return F.scaled_dot_product_attention(q, k, v, enable_gqa=True)
 
 
 def bench_sdpa_decode(batch_size, num_qo_heads, num_kv_heads, head_dim, c):
@@ -63,14 +46,14 @@ def bench_sdpa_decode(batch_size, num_qo_heads, num_kv_heads, head_dim, c):
     v = torch.randn(batch_size, num_kv_heads, c, head_dim, dtype=DTYPE, device=DEVICE)
 
     for _ in range(WARMUP):
-        sdpa_decode(q, k, v, num_qo_heads, num_kv_heads)
+        sdpa_decode(q, k, v)
     torch.cuda.synchronize()
 
     s = torch.cuda.Event(enable_timing=True)
     e = torch.cuda.Event(enable_timing=True)
     s.record()
     for _ in range(REPEAT):
-        sdpa_decode(q, k, v, num_qo_heads, num_kv_heads)
+        sdpa_decode(q, k, v)
     e.record()
     torch.cuda.synchronize()
     return s.elapsed_time(e) / REPEAT

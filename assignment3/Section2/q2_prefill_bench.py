@@ -18,18 +18,6 @@ REPEAT = 100
 DTYPE = torch.float16
 DEVICE = "cuda"
 
-_sdpa_supports_gqa = False
-try:
-    _q = torch.randn(1, 2, 1, 4, device=DEVICE, dtype=DTYPE)
-    _k = torch.randn(1, 1, 1, 4, device=DEVICE, dtype=DTYPE)
-    F.scaled_dot_product_attention(_q, _k, _k, enable_gqa=True)
-    _sdpa_supports_gqa = True
-except TypeError:
-    _sdpa_supports_gqa = False
-del _q, _k
-print(f"torch SDPA enable_gqa support: {_sdpa_supports_gqa}")
-
-
 def _jit_warmup_flashinfer():
     print("Pre-warming FlashInfer JIT kernels …")
     for p in (2 ** np.arange(7, 16)).astype(int):
@@ -47,14 +35,8 @@ def prefill_flops(batch_size, num_qo_heads, head_dim, p):
     return 4 * batch_size * num_qo_heads * head_dim * p * p
 
 
-def sdpa_prefill(q, k, v, num_qo_heads, num_kv_heads):
-    if _sdpa_supports_gqa:
-        return F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=True)
-    else:
-        g = num_qo_heads // num_kv_heads
-        k_e = k.repeat_interleave(g, dim=1)
-        v_e = v.repeat_interleave(g, dim=1)
-        return F.scaled_dot_product_attention(q, k_e, v_e, is_causal=True)
+def sdpa_prefill(q, k, v):
+    return F.scaled_dot_product_attention(q, k, v, is_causal=True, enable_gqa=True)
 
 
 def bench_sdpa_prefill(batch_size, num_qo_heads, num_kv_heads, head_dim, p):
@@ -63,14 +45,14 @@ def bench_sdpa_prefill(batch_size, num_qo_heads, num_kv_heads, head_dim, p):
     v = torch.randn(batch_size, num_kv_heads, p, head_dim, dtype=DTYPE, device=DEVICE)
 
     for _ in range(WARMUP):
-        sdpa_prefill(q, k, v, num_qo_heads, num_kv_heads)
+        sdpa_prefill(q, k, v)
     torch.cuda.synchronize()
 
     start = torch.cuda.Event(enable_timing=True)
     end   = torch.cuda.Event(enable_timing=True)
     start.record()
     for _ in range(REPEAT):
-        sdpa_prefill(q, k, v, num_qo_heads, num_kv_heads)
+        sdpa_prefill(q, k, v)
     end.record()
     torch.cuda.synchronize()
     return start.elapsed_time(end) / REPEAT
