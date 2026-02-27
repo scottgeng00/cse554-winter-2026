@@ -131,10 +131,10 @@ def build_kv_metadata(kvs: List[DistKVCache]):
     kv_last_page_len: List[int] = []
 
     for kv in kvs:
-        pass
-        #########
-        # FIXME #
-        #########
+        kv_indices.extend(kv.indices)
+        last_kv_indx = kv_indptr[-1]
+        kv_indptr.append(len(kv.indices) + last_kv_indx)
+        kv_last_page_len.append(kv.last_page_offset)
 
     device = "cuda"
     return (
