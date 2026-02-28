@@ -7,6 +7,7 @@ from typing import Dict, List
 import torch
 import flashinfer
 from transformers import AutoTokenizer
+import time
 
 # ---------------------------------------------------------------------------
 #  Project utilities (local module)
@@ -251,10 +252,11 @@ class Engine:
             
             #########
             for req in requests[num_decode_req:]:
+                assert req.request_id not in self.kv_cache_map, "request_id collision detected, already have prefill KV cache for request {}".format(req.request_id)
                 self.kv_cache_map[req.request_id] = DistKVCache(self.pool)
             #########
                 
-            seq_lens_before: List[int] = []
+            seq_lens_before: List[int] = [self.kv_cache_map[r.request_id].seqlen for r in requests]
             seq_lens_before_t = torch.tensor(seq_lens_before, dtype=torch.int32, device="cuda")
 
             # ----------------------------------------------------------------
@@ -284,28 +286,31 @@ class Engine:
             # ----------------------------------------------------------------
             if not len(requests) - num_decode_req == 0:
                 # plan prefill wrapper
+                print("[DEBUG] planning prefill for {} requests".format(len(requests) - num_decode_req))
                 #########
+                prefill_indptr_tensor = indptr_tensor[num_decode_req:] - indptr_tensor[num_decode_req] # grab only the indicies corresponding to prefill requests
                 self.prefill_wrapper.plan(
-                    qo_indptr=indptr_tensor,
-                    paged_kv_indptr=kv_indptr,
-                    paged_kv_indices=kv_indices,
-                    paged_kv_last_page_len=kv_last_page_len,
+                    qo_indptr=prefill_indptr_tensor,  # grab only the indicies corresponding to prefill requests
+                    paged_kv_indptr=kv_indptr[num_decode_req:],
+                    paged_kv_indices=kv_indices, # this is already indexed properly by sliced kv_indptr, no need to slice
+                    paged_kv_last_page_len=kv_last_page_len[num_decode_req:],
                     num_qo_heads=self.num_qo_heads,
                     num_kv_heads=self.num_kv_heads,
-                    head_dim=self.head_dim,
+                    head_dim_qk=self.head_dim,
                     page_size=self.page_size,
-                    data_type=torch.float16,
+                    kv_data_type=torch.float16,
                     pos_encoding_mode="ROPE_LLAMA",
                     causal=True
                 )
                 #########
             if num_decode_req > 0:
+                print("[DEBUG] planning decode for {} requests".format(num_decode_req))
                 # plan decode wrapper
                 #########
                 self.decode_wrapper.plan(
-                    indptr=kv_indptr,
+                    indptr=kv_indptr[:num_decode_req+1],  # grab only the indicies corresponding to decode requests
                     indices=kv_indices,
-                    last_page_len=kv_last_page_len,
+                    last_page_len=kv_last_page_len[:num_decode_req],  # grab only the indicies corresponding to decode requests
                     num_qo_heads=self.num_qo_heads,
                     num_kv_heads=self.num_kv_heads,
                     head_dim=self.head_dim,
@@ -313,7 +318,7 @@ class Engine:
                     data_type=torch.float16,
                     pos_encoding_mode="ROPE_LLAMA"
                 )
-                #########
+                ########
 
             # ----------------------------------------------------------------
             # 5) Forward pass through all *transformer* layers
@@ -321,6 +326,7 @@ class Engine:
             hidden = self.weights["embedding"][input_tensor]
 
             for layer in range(self.layers):
+                # print(f"[DEBUG] running layer {layer} …")
                 # === Self-attention sub-layer ==================================
                 rms = torch.sqrt(hidden.square().mean(-1, keepdim=True) + 1e-5)
                 ln_attn_in = (hidden / rms).to(torch.float16) * self.weights["layernormAttn_weight"][layer]
@@ -346,7 +352,13 @@ class Engine:
                 # apply ROPE, Note the the theta is set to 500_000.0 and offsets should be the current sequence length before allocate new tokens
                 
                 #########
-                # FIXME #
+                flashinfer.apply_rope_inplace(
+                    q=q,
+                    k=k,
+                    indptr=indptr_tensor,
+                    offsets=seq_lens_before_t,
+                    rope_theta=500_000.0,
+                )
                 #########
 
                 # ---- Append new tokens to *paged* KV-cache ------------------
@@ -354,19 +366,48 @@ class Engine:
                 # if you use get_batch_indices_positions, seq_lens should be the length after the allocation
 
                 #########
-                # FIXME #
+                batch_indices, positions = flashinfer.get_batch_indices_positions(
+                    append_indptr=indptr_tensor,
+                    seq_lens=seq_lens_after_t,
+                    nnz=len(input_tensor),
+                )
+                this_layer_cache = (self.pool.k_datas[layer], self.pool.v_datas[layer])
+                flashinfer.append_paged_kv_cache(
+                    append_key=k,
+                    append_value=v,
+                    batch_indices=batch_indices,
+                    positions=positions,
+                    paged_kv_cache=this_layer_cache,
+                    kv_indices=kv_indices,
+                    kv_indptr=kv_indptr,
+                    kv_last_page_len=kv_last_page_len,
+                    kv_layout="HND",
+                )
                 #########
 
                 # ---- Attention itself --------------------------------------
                 # run prefill and decode wrappers. Note that for the prefill wrapper, if qo_indptr does not start with 0, first qo_indptr[0] rows of the output tensor will be empty
-                attn_out = None
+                # uh im seeing that the last qo_indptr[0] rows are empty instead
                 #########
-                # FIXME #
+                # print(f"[DEBUG] q shape: {q.shape}, k/v shape: {k.shape}")
+                prefill_attn_out = None
+                decode_attn_out = None
+
+                if len(requests) - num_decode_req > 0:
+                    prefill_attn_out = self.prefill_wrapper.run(q[num_decode_req:], this_layer_cache) # pass only 
+                if num_decode_req > 0:
+                    decode_attn_out = self.decode_wrapper.run(q[:num_decode_req], this_layer_cache)  # grab only the q corresponding to decode requests
                 #########
                 
                 # aggregate the decode and prefill outputs
                 #########
-                # FIXME #
+                # not a mixed batch, ez to handle
+                if prefill_attn_out is None or decode_attn_out is None:
+                    attn_out = prefill_attn_out if prefill_attn_out is not None else decode_attn_out
+                else:
+                    attn_out = torch.cat([decode_attn_out, prefill_attn_out], dim=0)  # concat on batch dimension to restore original order
+
+                attn_out = attn_out.reshape(-1, self.num_qo_heads * self.head_dim)  # (total_seq_len, num_qo_heads * head_dim)
                 #########
                 
                 # Residual connection
@@ -420,14 +461,15 @@ class Engine:
             )
         
         # You do not need to support adding new request on the fly for this assignment, but if you want to, you can uncomment the following lines
-        # requests.append(Request(999, self.tokenizer("Today is", return_tensors="pt").input_ids[0], rounds))
+        requests.append(Request(998, self.tokenizer("The answer to 2+2 is", return_tensors="pt").input_ids[0], rounds))
+        requests.append(Request(999, self.tokenizer("Today is", return_tensors="pt").input_ids[0], rounds))
         # # ---- 1.5) Prefill pass for the new request --------------------------
-        # prefill_outputs = self.run(requests, num_decode_req=len(requests) - 1)
-        # for i in range(len(requests) - 1):
-        #     new_tok = prefill_outputs[i].unsqueeze(0)
-        #     requests[i].output_token_ids = torch.cat(
-        #         [requests[i].output_token_ids, new_tok], dim=0
-        #     )
+        prefill_outputs = self.run(requests, num_decode_req=len(requests) - 2)
+        for i in range(len(requests) - 1):
+            new_tok = prefill_outputs[i].unsqueeze(0)
+            requests[i].output_token_ids = torch.cat(
+                [requests[i].output_token_ids, new_tok], dim=0
+            )
 
         # ---- 2) Iterative decode passes ---------------------------------------
         for _ in range(rounds - 1):
