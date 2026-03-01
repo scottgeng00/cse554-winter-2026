@@ -85,10 +85,38 @@ def exp2(engine: Engine):
 
     fig.savefig(f'exp2.png', dpi=300)
 
+def exp3(engine: Engine):
+    batch_sizes = [2**i for i in range(0, 8)]
+    prefill_length = 128
+    decode_length = 128
+    num_trials = 5
+
+    results = dict()
+    for batch_size in batch_sizes:
+        results[batch_size] = run_exp(engine, batch_size, prefill_length, decode_length, num_trials=num_trials, warmup_trials=1)
+
+    # plot total time curve and tokens / sec curve with the log(batch size) as the x-axis.
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    axes[0].plot(batch_sizes, [results[bs]["avg_total_time"] for bs in batch_sizes], marker='o')
+    axes[0].set_xscale('log', base=2)
+    axes[0].set_xlabel('Batch Size (log scale)')
+    axes[0].set_ylabel(f'Average Total Time over {num_trials} Trials (sec)')
+    axes[0].set_title(f'End-to-End Time vs Batch Size')
+    total_toks = prefill_length + decode_length
+    axes[1].plot(batch_sizes, [total_toks * bs / results[bs]["avg_total_time"] for bs in batch_sizes], marker='o')
+    axes[1].set_xscale('log', base=2)
+    axes[1].set_xlabel('Batch Size (log scale)')
+    axes[1].set_ylabel(f'Tokens per Second')
+    axes[1].set_title(f'Tokens per Second vs Batch Size')    
+    fig.suptitle(f'Batch Size Scaling (Prefill Length={prefill_length}, Decode Length={decode_length})')
+
+    fig.savefig(f'exp3.png', dpi=300)
 
 if __name__ == "__main__":
     engine = Engine()
     
     # exp1(engine)
 
-    exp2(engine)
+    # exp2(engine)
+
+    exp3(engine)
