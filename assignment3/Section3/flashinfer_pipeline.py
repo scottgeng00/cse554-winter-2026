@@ -214,6 +214,12 @@ class Engine:
         self.decode_wrapper = flashinfer.BatchDecodeWithPagedKVCacheWrapper(
             self._fi_workspace, "HND", use_tensor_cores=True)
 
+    def reset(self) -> None:
+        """Reset the engine state (e.g., when all requests are done)."""
+        for kv in self.kv_cache_map.values():
+            kv.release()
+        self.kv_cache_map.clear()
+
     # ---------------------------------------------------------------------
     #  One *step* (mixed prefill + decode) over an *arbitrary* request batch
     # ---------------------------------------------------------------------
@@ -286,7 +292,7 @@ class Engine:
             # ----------------------------------------------------------------
             if not len(requests) - num_decode_req == 0:
                 # plan prefill wrapper
-                print("[DEBUG] planning prefill for {} requests".format(len(requests) - num_decode_req))
+                # print("[DEBUG] planning prefill for {} requests".format(len(requests) - num_decode_req))
                 #########
                 prefill_indptr_tensor = indptr_tensor[num_decode_req:] - indptr_tensor[num_decode_req] # grab only the indicies corresponding to prefill requests
                 self.prefill_wrapper.plan(
@@ -304,7 +310,7 @@ class Engine:
                 )
                 #########
             if num_decode_req > 0:
-                print("[DEBUG] planning decode for {} requests".format(num_decode_req))
+                # print("[DEBUG] planning decode for {} requests".format(num_decode_req))
                 # plan decode wrapper
                 #########
                 self.decode_wrapper.plan(
@@ -326,7 +332,6 @@ class Engine:
             hidden = self.weights["embedding"][input_tensor]
 
             for layer in range(self.layers):
-                # print(f"[DEBUG] running layer {layer} …")
                 # === Self-attention sub-layer ==================================
                 rms = torch.sqrt(hidden.square().mean(-1, keepdim=True) + 1e-5)
                 ln_attn_in = (hidden / rms).to(torch.float16) * self.weights["layernormAttn_weight"][layer]
@@ -389,7 +394,6 @@ class Engine:
                 # run prefill and decode wrappers. Note that for the prefill wrapper, if qo_indptr does not start with 0, first qo_indptr[0] rows of the output tensor will be empty
                 # uh im seeing that the last qo_indptr[0] rows are empty instead
                 #########
-                # print(f"[DEBUG] q shape: {q.shape}, k/v shape: {k.shape}")
                 prefill_attn_out = None
                 decode_attn_out = None
 
@@ -461,10 +465,10 @@ class Engine:
             )
         
         # You do not need to support adding new request on the fly for this assignment, but if you want to, you can uncomment the following lines
-        requests.append(Request(998, self.tokenizer("The answer to 2+2 is", return_tensors="pt").input_ids[0], rounds))
+        # requests.append(Request(998, self.tokenizer("The answer to 2+2 is", return_tensors="pt").input_ids[0], rounds))
         requests.append(Request(999, self.tokenizer("Today is", return_tensors="pt").input_ids[0], rounds))
         # # ---- 1.5) Prefill pass for the new request --------------------------
-        prefill_outputs = self.run(requests, num_decode_req=len(requests) - 2)
+        prefill_outputs = self.run(requests, num_decode_req=len(requests) - 1)
         for i in range(len(requests) - 1):
             new_tok = prefill_outputs[i].unsqueeze(0)
             requests[i].output_token_ids = torch.cat(
@@ -486,6 +490,43 @@ class Engine:
             for r in requests
         ]
 
+    # ---------------------------------------------------------------------
+    # For the benchmarking code, it's easier to work tokens directly to ensure token lengths
+    # ---------------------------------------------------------------------
+    def generate_batched_from_ids_with_timings(self, prompt_ids: List[torch.Tensor], rounds: int = 20):
+        """Same as generate_batched but takes token IDs directly (for testing)."""
+        requests: List[Request] = []
+        for idx, ids in enumerate(prompt_ids):
+            requests.append(Request(idx, ids, rounds))
+
+
+        # The rest of the code is identical to generate_batched, except we skip tokenization and decoding steps
+        prefill_start = time.perf_counter()
+        prefill_outputs = self.run(requests, num_decode_req=0)
+        prefill_time = time.perf_counter() - prefill_start
+
+        for i in range(len(requests)):
+            new_tok = prefill_outputs[i].unsqueeze(0)
+            requests[i].output_token_ids = torch.cat(
+                [requests[i].output_token_ids, new_tok], dim=0
+            )
+
+        decode_times = dict()
+
+        for decode_round in range(rounds - 1):
+            decode_start = time.perf_counter()
+            decode_outputs = self.run(requests, num_decode_req=len(requests))
+            decode_time = time.perf_counter() - decode_start
+            decode_times[decode_round] = decode_time
+
+            for i in range(len(requests)):
+                new_tok = decode_outputs[i].unsqueeze(0)
+                requests[i].output_token_ids = torch.cat(
+                    [requests[i].output_token_ids, new_tok], dim=0
+                )
+        total_time = sum(decode_times.values()) + prefill_time
+
+        return prefill_time, decode_times, total_time
 
 # ---------------------------------------------------------------------------
 #  Entry-point (debug / standalone execution)
