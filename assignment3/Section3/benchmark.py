@@ -18,7 +18,11 @@ def make_fake_prompt(batch_size: int, seq_len: int, vocab_size: int) -> torch.Te
 def run_exp(engine: Engine, batch_size, prefill_len, decode_len, num_trials=3, warmup_trials=1) -> Dict[str, float]:
     all_times = []
     for trial in tqdm(range(num_trials + warmup_trials), desc=f"Running warmup + trials for batch_size={batch_size}, prefill_len={prefill_len}, decode_len={decode_len}"):
+
         engine.reset()
+        torch.cuda.empty_cache()
+        gc.collcet()
+
         prompt_ids = make_fake_prompt(batch_size, prefill_len, len(engine.tokenizer))
         prefill_time, decode_times, total_time = engine.generate_batched_from_ids_with_timings(
             prompt_ids, rounds=decode_len
@@ -115,8 +119,8 @@ def exp3(engine: Engine):
 if __name__ == "__main__":
     engine = Engine()
     
-    # exp1(engine)
+    exp1(engine)
 
-    # exp2(engine)
+    exp2(engine)
 
     exp3(engine)
