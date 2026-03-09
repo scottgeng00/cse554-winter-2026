@@ -60,3 +60,5 @@ urllib3==2.3.0
 zipp==3.21.0
 pybind11
 pybind11-stubgen
+flashinfer-python==0.6.5
+vllm==0.17.0

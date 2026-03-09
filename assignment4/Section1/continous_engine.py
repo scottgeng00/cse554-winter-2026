@@ -275,16 +275,44 @@ class Engine:
             # ----------------------------------------------------------------
             # 4) Plan FlashInfer execution for this micro-batch
             # ----------------------------------------------------------------
-            if not len(requests) - num_decode_req == 0:
-                pass
-                #########
-                # FIXME #
-                #########
+            num_prefill_req = len(requests) - num_decode_req
+            if num_prefill_req > 0:
+                prefill_start_ptr = num_decode_req
+                # take only prefill, reset to start at 0.
+                prefill_qo_indptr = indptr_tensor[prefill_start_ptr:] - indptr_tensor[prefill_start_ptr]
+                # reset kv bits
+                prefill_kv_indptr = kv_indptr[prefill_start_ptr:] - kv_indptr[prefill_start_ptr]
+                page_start = kv_indptr[prefill_start_ptr]
+                page_end = kv_indptr[-1]
+                prefill_kv_indices = kv_indices[page_start:page_end]
+                prefill_kv_last_page_len = kv_last_page_len[prefill_start_ptr:len(requests)]
+                self.prefill_wrapper.plan(
+                    prefill_qo_indptr,
+                    prefill_kv_indptr,
+                    prefill_kv_indices,
+                    prefill_kv_last_page_len,
+                    self.num_qo_heads,
+                    self.num_kv_heads,
+                    self.head_dim,
+                    self.page_size,
+                    causal=True,
+                )
             if num_decode_req > 0:
-                pass
-                #########
-                # FIXME #
-                #########
+                decode_kv_indptr = kv_indptr[0:num_decode_req + 1]
+                page_end = kv_indptr[num_decode_req]
+                decode_kv_indices = kv_indices[0:page_end]
+                decode_kv_last_page_len = kv_last_page_len[0:num_decode_req]
+                self.decode_wrapper.plan(
+                    decode_kv_indptr,
+                    decode_kv_indices,
+                    decode_kv_last_page_len,
+                    self.num_qo_heads,
+                    self.num_kv_heads,
+                    self.head_dim,
+                    self.page_size,
+                    pos_encoding_mode="NONE",
+                    data_type=torch.float16,
+                )
 
             # ----------------------------------------------------------------
             # 5) Forward pass through all *transformer* layers
@@ -346,14 +374,28 @@ class Engine:
                 # ---- Attention itself --------------------------------------
                 # run prefill and decode wrappers. Note that for the prefill wrapper, if qo_indptr does not start with 0, first qo_indptr[0] rows of the output tensor will be empty
                 attn_out = None
-                #########
-                # FIXME #
-                #########
+                prefill_out, decode_out = None, None
+                if num_prefill_req > 0:
+                    prefill_out = self.prefill_wrapper.run(
+                        q[num_decode_req:],
+                        (self.pool.k_datas[layer], self.pool.v_datas[layer]),
+                    )
+                if num_decode_req > 0:
+                    decode_out = self.decode_wrapper.run(
+                        q[:num_decode_req],
+                        (self.pool.k_datas[layer], self.pool.v_datas[layer]),
+                    )
+
                 
                 # aggregate the decode and prefill outputs
-                #########
-                # FIXME #
-                #########      
+                if decode_out is not None and prefill_out is not None:
+                    attn_out = torch.cat([decode_out, prefill_out], dim=0)
+                elif decode_out is not None:
+                    attn_out = decode_out
+                else:
+                    attn_out = prefill_out
+                # back to (batch, hidden_dim)
+                attn_out = attn_out.reshape(q.size(0), -1)
                           
                 # Residual connection
                 hidden = attn_out.matmul(self.weights["o_proj_weight"][layer].T) + hidden

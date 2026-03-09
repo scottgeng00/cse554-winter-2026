@@ -21,4 +21,4 @@ for prompt in sample_prompts:
 while not scheduler.finished():
     scheduler.run()
 
-# scheduler.print_completed()
+scheduler.print_completed()
